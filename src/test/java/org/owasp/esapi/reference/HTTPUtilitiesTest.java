@@ -29,6 +29,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 
+import org.apache.commons.fileupload.FileCountLimitExceededException;
 import org.owasp.esapi.Authenticator;
 import org.owasp.esapi.ESAPI;
 import org.owasp.esapi.EncoderConstants;
@@ -41,6 +42,7 @@ import org.owasp.esapi.errors.AuthenticationException;
 import org.owasp.esapi.errors.EncryptionException;
 import org.owasp.esapi.errors.EnterpriseSecurityException;
 import org.owasp.esapi.errors.ValidationException;
+import org.owasp.esapi.errors.ValidationUploadException;
 import org.owasp.esapi.http.MockHttpServletRequest;
 import org.owasp.esapi.http.MockHttpServletResponse;
 import org.owasp.esapi.http.MockHttpSession;
@@ -274,6 +276,227 @@ public class HTTPUtilitiesTest extends TestCase
 			FileTestUtils.deleteRecursively(home);
 		}
 
+	}
+
+	/**
+	 * Verify that the ESAPI properties that control the file upload DoS protections
+	 * (HttpUtilities.MaxUploadFileCount and HttpUtilities.FileUploadAllowAnonymousUser)
+	 * are present in 'src/test/resources/esapi/ESAPI.properties' and readable under the
+	 * property names used by DefaultHTTPUtilities.
+	 */
+	public void testFileUploadLimitProperties() throws Exception {
+		System.out.println("testFileUploadLimitProperties");
+		assertEquals( 2, ESAPI.securityConfiguration().getIntProp( DefaultSecurityConfiguration.MAX_UPLOAD_FILE_COUNT ) );
+		assertEquals( Boolean.FALSE, ESAPI.securityConfiguration().getBooleanProp( DefaultSecurityConfiguration.FILEUPLOAD_ALLOW_ANONYMOUS_USERS ) );
+	}
+
+	/**
+	 * Second test of getFileUpload() method, of class org.owasp.esapi.HTTPUtilities.
+	 * This one is designed to fail by uploading 3 files. (The max is set to 2 files.)
+	 * Based on experimentation with a dummy HTML form to send to localhost:8081
+	 * and the captured request caught by running 'nc -l 127.0.0.01 8081', this 'content'
+	 * is what it looks like (changing the boundary back 'ridiculous') for the
+	 * result of this HTML form:
+	 * <pre>
+	 *    <!DOCTYPE html>
+	 *    <html lang="en-US">
+	 *    <head>
+	 *        <title>Multifle-upload</title>
+	 *    </head>
+	 *    <body>
+	 *    Upload files...
+	 *    <form action="http://127.0.0.1:8081/"
+	 *           enctype="multipart/form-data"
+	 *           method="POST">
+	 *       <p>
+	 *       What is your name?
+	 *       <input type="text" name="full-name"><br/>
+	 *       </p<p><br/>What files are you sending?<br/>
+	 *       <label for="file1">File 1:</label>
+	 *       <input type="file" id="file1" name="file1"><br/>
+	 *       <label for="file2">File 2:</label>
+	 *       <input type="file" id="file2" name="file2"><br/>
+	 *       <label for="file3">File 3:</label>
+	 *       <input type="file" id="file3" name="file3"><br/>
+	 *       <br/>
+	 *       <input type="submit" value="Send">
+	 *       <input type="reset">
+	 *       </p>
+	 *     </form>
+	 *    </body>
+	 *    </html>
+	 * </pre>
+	 * with the 'full-name' field filled in with 'kevin w. wall' and the 3
+	 * uploaded files filled in with files named 'aaa.txt', 'bbb.txt', and 'ccc.txt',
+	 * respectively and each those file containing created thusly from bash:
+	 * <pre>
+	 *     $ echo AAA >aaa.txt
+	 *     $ echo BBB >bbb.txt
+	 *     $ echo CCC >ccc.txt
+	 * </pre>
+	 * Because we are uploading 3 files, but have the property HttpUtilities.MaxUploadFileCount
+	 * set to 2 in 'src/test/resources/esapi/ESAPI.properties', the file upload
+	 * attempt via HTTPUtilities.getFileUploads() will result in throwing a ValidationUploadException,
+	 * and if you look through the exception stack trace, you can see the
+	 * 'Caused by' reason is:
+	 *      Caused by: org.apache.commons.fileupload.FileCountLimitExceededException: attachment
+	 *          at org.apache.commons.fileupload.FileUploadBase.parseRequest(FileUploadBase.java:367)
+	 *          at org.apache.commons.fileupload.servlet.ServletFileUpload.parseRequest(ServletFileUpload.java:113)
+	 *          at org.owasp.esapi.reference.DefaultHTTPUtilities.getFileUploads(DefaultHTTPUtilities.java:628)
+	 *          ... 23 more
+	 * which is as it should be.
+	 * <p>
+	 * The limit is pinned to that same value of 2 for the duration of this test
+	 * (and restored afterwards), so the result does not depend on which
+	 * SecurityConfiguration happened to be active when DefaultHTTPUtilities was
+	 * first loaded. The same request is first sent with no file count limit (the
+	 * behavior before CVE-2023-24998 was addressed) to show that it is otherwise
+	 * a perfectly acceptable upload.
+	 */
+	public void testGetFileUploadsTooManyFiles() throws Exception {
+		File home = null;
+		int savedMaxFiles = DefaultHTTPUtilities.maxFiles;
+		boolean savedAllowAnonymous = DefaultHTTPUtilities.fileUploadAllowAnonymousUsers;
+
+		System.out.println("testGetFileUploadsTooManyFiles");
+
+		try
+		{
+			// Only the file count limit is under test here.
+			DefaultHTTPUtilities.fileUploadAllowAnonymousUsers = true;
+
+			home = FileTestUtils.createTmpDirectory(CLASS_NAME);
+			String content =    "Content-Type: multipart/form-data; boundary=ridiculous\r\n\r\n\r\n" +
+			                    "--ridiculous\r\n" +
+			                    "Content-Disposition: form-data; name=\"full-name\"\r\n\r\n" +
+			                    "kevin w wall\r\n" +
+			                    "--ridiculous\r\n" +
+			                    "Content-Disposition: form-data; name=\"file1\"; filename=\"aaa.txt\"\r\n" +
+			                    "Content-Type: text/plain\r\n\r\n" +
+			                    "AAA\r\n\r\n" +
+			                    "--ridiculous\r\n" +
+			                    "Content-Disposition: form-data; name=\"file2\"; filename=\"bbb.txt\"\r\n" +
+			                    "Content-Type: text/plain\r\n\r\n" +
+			                    "BBB\r\n\r\n" +
+			                    "--ridiculous\r\n" +
+			                    "Content-Disposition: form-data; name=\"file3\"; filename=\"ccc.txt\"\r\n" +
+			                    "Content-Type: text/plain\r\n\r\n" +
+			                    "CCC\r\n\r\n" +
+			                    "--ridiculous--\r\n\r\n";
+
+			MockHttpServletResponse response = new MockHttpServletResponse();
+			MockHttpServletRequest request1 = new MockHttpServletRequest("/test", content.getBytes(response.getCharacterEncoding()));
+			request1.setContentType( "multipart/form-data; boundary=ridiculous");
+			ESAPI.httpUtilities().setCurrentHTTP(request1, response);
+			DefaultHTTPUtilities.maxFiles = -1;     // No limit, i.e., the behavior before the fix.
+			List<File> response1 = ESAPI.httpUtilities().getFileUploads(request1, home);
+			assertEquals( "Without a file count limit, all 3 files should be uploaded.", 3, response1.size() );
+			for ( File file : response1 ) {
+				file.delete();
+			}
+
+			MockHttpServletRequest request2 = new MockHttpServletRequest("/test", content.getBytes(response.getCharacterEncoding()));
+			request2.setContentType( "multipart/form-data; boundary=ridiculous");
+			ESAPI.httpUtilities().setCurrentHTTP(request2, response);
+			DefaultHTTPUtilities.maxFiles = 2;      // Same as HttpUtilities.MaxUploadFileCount in src/test/resources/esapi/ESAPI.properties
+			List<File> response2 = new ArrayList<File>();
+			boolean caughtExpectedException = false;
+			try {
+				response2 = ESAPI.httpUtilities().getFileUploads(request2, home);
+			} catch( ValidationUploadException vuex ) {
+				caughtExpectedException = true;
+				assertTrue( "Upload should have been rejected because of the file count limit, but was rejected because of: " + vuex.getCause(),
+				            vuex.getCause() instanceof FileCountLimitExceededException );
+			} finally {
+				for ( File file : response2 ) {
+					file.delete();
+				}
+			}
+			    // If this assertion fails, check the property HttpUtilities.MaxUploadFileCount in
+			    // 'src/test/resources/esapi/ESAPI.properties' to make sure it is still to 2.
+			assertTrue("Did not catch expected ValidationUploadException because too many files uploaded.", caughtExpectedException );
+		}
+		finally
+		{
+			DefaultHTTPUtilities.maxFiles = savedMaxFiles;
+			DefaultHTTPUtilities.fileUploadAllowAnonymousUsers = savedAllowAnonymous;
+			FileTestUtils.deleteRecursively(home);
+		}
+
+	}
+
+	/** Test HTTPUtilities.getFileUploads with an unauthenticated (i.e.,
+	 *  anonymous) user. In 'src/test/resources/esapi/ESAPI.properties', the
+	 *  property 'HttpUtilities.FileUploadAllowAnonymousUser' is set to 'false',
+	 *  so the upload must be blocked with a java.security.AccessControlException.
+	 *  <p>
+	 *  Most (all?) of these tests are executed after testCSRFToken(), which
+	 *  creates a random user account name that gets used when
+	 *  <pre>
+	 *      ESAPI.authenticator().setCurrentUser( user );
+	 *  </pre>
+	 *  gets called a few lines later. That seems to persist throughout the
+	 *  remainder of this test suite. This test therefore clears that information
+	 *  so that the HTTP request is made as an anonymous user, and restores it
+	 *  afterwards so that the order these test cases are executed in does not
+	 *  matter. The property value is likewise pinned for the duration of this
+	 *  test (and restored afterwards). The same anonymous upload is first made
+	 *  with anonymous uploads allowed (the behavior before this setting existed)
+	 *  to show that it is otherwise a perfectly acceptable upload.
+	 */
+	public void testGetFileUploadsUnauthenticatedUser() throws Exception {
+		System.out.println( "testGetFileUploadsUnauthenticatedUser" );
+
+		File home = null;
+		boolean savedAllowAnonymous = DefaultHTTPUtilities.fileUploadAllowAnonymousUsers;
+		User savedUser = ESAPI.authenticator().getCurrentUser();
+
+		try
+		{
+			    // Clear the current user info making it effective an anonymous user again.
+			ESAPI.authenticator().clearCurrent();   // Either this or logout(), but logout may kill the session too.
+			assertTrue( ESAPI.authenticator().getCurrentUser().isAnonymous() );
+
+			home = FileTestUtils.createTmpDirectory(CLASS_NAME);
+			String content = "--ridiculous\r\nContent-Disposition: form-data; name=\"upload\"; filename=\"testupload.txt\"\r\nContent-Type: application/octet-stream\r\n\r\nThis is a test of the multipart broadcast system.\r\nThis is only a test.\r\nStop.\r\n\r\n--ridiculous\r\nContent-Disposition: form-data; name=\"submit\"\r\n\r\nSubmit Query\r\n--ridiculous--\r\nEpilogue";
+
+			MockHttpServletResponse response = new MockHttpServletResponse();
+			MockHttpServletRequest request1 = new MockHttpServletRequest("/test", content.getBytes(response.getCharacterEncoding()));
+			request1.setContentType( "multipart/form-data; boundary=ridiculous");
+			ESAPI.httpUtilities().setCurrentHTTP(request1, response);
+			DefaultHTTPUtilities.fileUploadAllowAnonymousUsers = true;
+			List<File> response1 = ESAPI.httpUtilities().getFileUploads(request1, home);
+			assertEquals( "Anonymous upload should succeed when anonymous uploads are allowed.", 1, response1.size() );
+			for ( File file : response1 ) {
+				file.delete();
+			}
+
+			MockHttpServletRequest request2 = new MockHttpServletRequest("/test", content.getBytes(response.getCharacterEncoding()));
+			request2.setContentType( "multipart/form-data; boundary=ridiculous");
+			ESAPI.httpUtilities().setCurrentHTTP(request2, response);
+			DefaultHTTPUtilities.fileUploadAllowAnonymousUsers = false;     // Same as src/test/resources/esapi/ESAPI.properties
+			List<File> response2 = new ArrayList<File>();
+			try {
+				response2 = ESAPI.httpUtilities().getFileUploads(request2, home);
+				fail("Expecting an exception here");
+			} catch ( java.security.AccessControlException acex ) {
+				;   // Expected
+			} catch ( Exception ex ) {
+				fail("Wrong exception type caught: " + ex.getClass().getName() +
+				     ", received, expected java.security.AccessControlException");
+			} finally {
+				for ( File file : response2 ) {
+					file.delete();
+				}
+			}
+			assertEquals( "No file should have been written for the blocked anonymous upload.", 0, home.list().length );
+		}
+		finally
+		{
+			DefaultHTTPUtilities.fileUploadAllowAnonymousUsers = savedAllowAnonymous;
+			ESAPI.authenticator().setCurrentUser( savedUser );
+			FileTestUtils.deleteRecursively(home);
+		}
 	}
 
 

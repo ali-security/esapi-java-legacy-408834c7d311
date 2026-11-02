@@ -199,8 +199,9 @@
         <dependency>
             <groupId>commons-fileupload</groupId>
             <artifactId>commons-fileupload</artifactId>
-            <!-- Upgrading to 1.4 causes this test case failure: [ERROR] HTTPUtilitiesTest.testGetFileUploads:259. TODO: Figure out why, and fix. -->
-            <version>1.3.3</version>
+            <!-- 1.5 is required for FileUploadBase.setFileCountMax() (CVE-2023-24998). It also fixes FILEUPLOAD-293,
+                 the 1.4 regression that caused HTTPUtilitiesTest.testGetFileUploads to fail when overwriting a file. -->
+            <version>1.5</version>
             <exclusions>
                 <!-- excluded because we directly import newer version. -->
                 <exclusion>
