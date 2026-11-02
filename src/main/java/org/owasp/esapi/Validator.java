@@ -164,16 +164,6 @@ public interface Validator {
 	Date getValidDate(String context, String input, DateFormat format, boolean allowNull, ValidationErrorList errorList) throws IntrusionException;
 
 	/**
-	 * Calls getValidSafeHTML and returns true if no exceptions are thrown.
-	 */
-	boolean isValidSafeHTML(String context, String input, int maxLength, boolean allowNull) throws IntrusionException;
-
-	/**
-	 * Calls getValidSafeHTML and returns true if no exceptions are thrown.
-	 */
-	boolean isValidSafeHTML(String context, String input, int maxLength, boolean allowNull, ValidationErrorList errorList) throws IntrusionException;
-
-	/**
 	 * Returns canonicalized and validated "safe" HTML that does not contain unwanted scripts in the body, attributes, CSS, URLs, or anywhere else.
 	 * Implementors should reference the OWASP AntiSamy project for ideas
 	 * on how to do HTML validation in a whitelist way, as this is an extremely difficult problem.

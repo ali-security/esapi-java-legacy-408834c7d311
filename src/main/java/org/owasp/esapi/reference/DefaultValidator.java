@@ -314,31 +314,6 @@ public class DefaultValidator implements org.owasp.esapi.Validator {
 
 	/**
 	 * {@inheritDoc}
-	 */
-	public boolean isValidSafeHTML(String context, String input, int maxLength, boolean allowNull) throws IntrusionException {
-		try {
-			getValidSafeHTML( context, input, maxLength, allowNull);
-			return true;
-		} catch( Exception e ) {
-			return false;
-		}
-	}
-
-        /**
-	 * {@inheritDoc}
-	 */
-	public boolean isValidSafeHTML(String context, String input, int maxLength, boolean allowNull, ValidationErrorList errors) throws IntrusionException {
-		try {
-			getValidSafeHTML( context, input, maxLength, allowNull);
-			return true;
-		} catch( ValidationException e ) {
-            errors.addError(context, e);
-			return false;
-		}
-	}
-
-	/**
-	 * {@inheritDoc}
 	 *
 	 * This implementation relies on the OWASP AntiSamy project.
 	 */

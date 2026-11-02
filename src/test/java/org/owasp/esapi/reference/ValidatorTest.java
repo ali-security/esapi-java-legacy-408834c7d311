@@ -21,6 +21,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -881,31 +882,38 @@ public class ValidatorTest extends TestCase {
         //		isValidRedirectLocation(String, String, boolean)
     }
 
-    public void testIsValidSafeHTML() {
-        System.out.println("isValidSafeHTML");
+    // Validator.isValidSafeHTML() has been removed. It reported unsafe input
+    // (e.g., input containing <script> tags) as "valid", luring callers into
+    // using the original, unsanitized input. See GitHub Security Advisory
+    // https://github.com/ESAPI/esapi-java-legacy/security/advisories/GHSA-r68h-jhhj-9jvm
+    // and the referenced ESAPI Security Bulletin mentioned therein.
+    // Validator.getValidSafeHTML() must be used instead so that only the
+    // cleansed output is ever used.
+    public void testIsValidSafeHTMLRemoved() throws Exception {
+        System.out.println("testIsValidSafeHTMLRemoved");
+        Class<?>[] classes = { Validator.class, DefaultValidator.class, ESAPI.validator().getClass() };
+        for (Class<?> clazz : classes) {
+            for (Method method : clazz.getMethods()) {
+                assertFalse(clazz.getName() + " must not expose isValidSafeHTML",
+                        "isValidSafeHTML".equals(method.getName()));
+            }
+        }
+
         Validator instance = ESAPI.validator();
-
-        assertTrue(instance.isValidSafeHTML("test", "<b>Jeff</b>", 100, false));
-        assertTrue(instance.isValidSafeHTML("test", "<a href=\"http://www.aspectsecurity.com\">Aspect Security</a>", 100, false));
-        assertTrue(instance.isValidSafeHTML("test", "Test. <script>alert(document.cookie)</script>", 100, false));
-        assertTrue(instance.isValidSafeHTML("test", "Test. <div style={xss:expression(xss)}>", 100, false));
-        assertTrue(instance.isValidSafeHTML("test", "Test. <s%00cript>alert(document.cookie)</script>", 100, false));
-        assertTrue(instance.isValidSafeHTML("test", "Test. <s\tcript>alert(document.cookie)</script>", 100, false));
-        assertTrue(instance.isValidSafeHTML("test", "Test. <s\r\n\0cript>alert(document.cookie)</script>", 100, false));
-
-        // TODO: waiting for a way to validate text headed for an attribute for scripts
-        // This would be nice to catch, but just looks like text to AntiSamy
-        // assertFalse(instance.isValidSafeHTML("test", "\" onload=\"alert(document.cookie)\" "));
         ValidationErrorList errors = new ValidationErrorList();
-        assertTrue(instance.isValidSafeHTML("test1", "<b>Jeff</b>", 100, false, errors));
-        assertTrue(instance.isValidSafeHTML("test2", "<a href=\"http://www.aspectsecurity.com\">Aspect Security</a>", 100, false, errors));
-        assertTrue(instance.isValidSafeHTML("test3", "Test. <script>alert(document.cookie)</script>", 100, false, errors));
-        assertTrue(instance.isValidSafeHTML("test4", "Test. <div style={xss:expression(xss)}>", 100, false, errors));
-        assertTrue(instance.isValidSafeHTML("test5", "Test. <s%00cript>alert(document.cookie)</script>", 100, false, errors));
-        assertTrue(instance.isValidSafeHTML("test6", "Test. <s\tcript>alert(document.cookie)</script>", 100, false, errors));
-        assertTrue(instance.isValidSafeHTML("test7", "Test. <s\r\n\0cript>alert(document.cookie)</script>", 100, false, errors));
-        assertTrue(errors.size() == 0);
-
+        String[] unsafeInputs = {
+            "Test. <script>alert(document.cookie)</script>",
+            "Test. <s%00cript>alert(document.cookie)</script>",
+            "Test. <s\tcript>alert(document.cookie)</script>",
+            "Test. <s\r\n\0cript>alert(document.cookie)</script>"
+        };
+        for (int i = 0; i < unsafeInputs.length; i++) {
+            String safe = instance.getValidSafeHTML("test" + i, unsafeInputs[i], 100, false, errors);
+            assertFalse("Unsafe input must be sanitized: " + safe, safe.toLowerCase().contains("<script"));
+            assertFalse("Unsafe input must be sanitized: " + safe, safe.toLowerCase().contains("</script>"));
+            assertFalse("Unsafe input must not be returned as-is", unsafeInputs[i].equals(safe));
+        }
+        assertEquals(0, errors.size());
     }
 
     public void testSafeReadLine() {
